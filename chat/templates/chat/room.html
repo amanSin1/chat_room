@@ -1,0 +1,203 @@
+<!-- chat/templates/chat/room.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <title>Public Chat Room</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background-color: #222; color: #eee; }
+        #chat-log {
+            border: 1px solid #444;
+            padding: 10px;
+            height: 300px;
+            overflow-y: scroll;
+            margin-bottom: 10px;
+            background-color: #333;
+        }
+        .chat-message { margin-bottom: 5px; }
+        .chat-message strong { color: #f0f0f0; }
+        .chat-message .timestamp { font-size: 0.75em; color: #888; margin-left: 10px; }
+        #chat-message-input { width: 80%; padding: 8px; background-color: #444; color: #eee; border: 1px solid #555;}
+        #chat-message-submit { padding: 8px 15px; background-color: #007bff; color: white; border: none; cursor: pointer; }
+        #chat-message-submit:hover { background-color: #0056b3; }
+        #notification-log {
+            margin-top: 20px;
+            border: 1px solid #444;
+            padding: 10px;
+            background-color: #333;
+        }
+        .notification-item {
+            background-color: #555;
+            padding: 8px;
+            margin-bottom: 5px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Public Chat Room</h1>
+    <div id="chat-log"></div>
+    <input id="chat-message-input" type="text" size="100"><br>
+    <input id="chat-message-submit" type="button" value="Send">
+
+    <h2>Notifications</h2>
+    <div id="notification-log">
+        <p><em>Waiting for notifications...</em></p>
+    </div>
+
+    <!-- NEW: Hidden element to pass user ID to JavaScript -->
+    {% if user_id %}
+    <div id="current-user-id" data-user-id="{{ user_id }}" style="display:none;"></div>
+    {% endif %}
+    <!-- END NEW -->
+
+    <script>
+        const chatLog = document.querySelector('#chat-log');
+        const chatMessageInput = document.querySelector('#chat-message-input');
+        const chatMessageSubmit = document.querySelector('#chat-message-submit');
+        const notificationLog = document.querySelector('#notification-log');
+
+        // Helper function to add a message to the chat log
+        function addChatMessageToLog(username, message, timestamp) {
+            const date = new Date(timestamp);
+            const timeString = date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            chatLog.innerHTML += `
+                <p class="chat-message">
+                    <strong>${username}:</strong> ${message}
+                    <span class="timestamp">${timeString}</span>
+                </p>
+            `;
+            chatLog.scrollTop = chatLog.scrollHeight;
+        }
+
+        // Helper function to add a notification to the notification log
+        function addNotificationToLog(message, timestamp, id) {
+            const date = new Date(timestamp);
+            const timeString = date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            notificationLog.innerHTML += `
+                <div class="notification-item" data-notification-id="${id || ''}">
+                    ${message} <span class="timestamp">(${timeString})</span>
+                </div>
+            `;
+        }
+
+        // --- Chat WebSocket Logic (remains the same) ---
+        const chatSocket = new WebSocket(
+            'ws://' + window.location.host + '/ws/chat/'
+        );
+
+        chatSocket.onopen = function(e) {
+            console.log('Chat WebSocket connection opened!');
+            chatLog.innerHTML = '<p><em>Connected to chat.</em></p>';
+        };
+
+        chatSocket.onmessage = function(e) {
+            const data = JSON.parse(e.data);
+            if (data.type === 'chat_history') {
+                chatLog.innerHTML += '<p><em>--- Chat History ---</em></p>';
+                data.messages.forEach(msg => {
+                    addChatMessageToLog(msg.username, msg.message, msg.timestamp);
+                });
+                chatLog.innerHTML += '<p><em>--- Live Chat ---</em></p>';
+            } else if (data.type === 'chat_message') {
+                addChatMessageToLog(data.username, data.message, data.timestamp);
+            } else {
+                console.warn('Unknown chat message type received:', data.type);
+            }
+        };
+
+        chatSocket.onclose = function(e) {
+            console.error('Chat socket closed unexpectedly');
+            if (e.code === 1000) {
+                chatLog.innerHTML += '<p><em>Disconnected from chat.</em></p>';
+            } else if (e.code === 1006) {
+                 chatLog.innerHTML += '<p><em>Chat connection failed or closed. Are you logged in?</em></p>';
+            } else {
+                chatLog.innerHTML += '<p><em>Disconnected from chat (Code: ' + e.code + ').</em></p>';
+            }
+        };
+
+        chatSocket.onerror = function(e) {
+            console.error('Chat WebSocket error:', e);
+            chatLog.innerHTML += '<p style="color: red;"><em>Chat WebSocket error. Check console.</em></p>';
+        };
+
+        chatMessageInput.focus();
+        chatMessageInput.onkeyup = function(e) {
+            if (e.keyCode === 13) {
+                chatMessageSubmit.click();
+            }
+        };
+
+        chatMessageSubmit.onclick = function(e) {
+            const message = chatMessageInput.value;
+            if (message.trim() === '') return;
+
+            chatSocket.send(JSON.stringify({
+                'message': message
+            }));
+            chatMessageInput.value = '';
+        };
+
+        // --- NEW: Notification WebSocket Logic (modified to get user ID) ---
+        // Get the current user's ID from the hidden element
+        const currentUserIdElement = document.getElementById('current-user-id');
+        const currentUserId = currentUserIdElement ? currentUserIdElement.dataset.userId : null;
+
+        if (!currentUserId) {
+            console.error("User ID not found for notification WebSocket. Please ensure you are logged in.");
+            notificationLog.innerHTML = '<p style="color: red;"><em>Cannot connect to notifications: User ID missing or not logged in.</em></p>';
+            // Optionally disable notification features if user is not logged in
+        } else {
+            const notificationSocket = new WebSocket(
+                'ws://' + window.location.host + '/ws/notifications/' + currentUserId + '/'
+            );
+
+            notificationSocket.onopen = function(e) {
+                console.log('Notification WebSocket connection opened!');
+                // Clear previous messages if re-connecting
+                notificationLog.innerHTML = '<p><em>Connected to notifications.</em></p>';
+            };
+
+            notificationSocket.onmessage = function(e) {
+                const data = JSON.parse(e.data);
+                console.log('Received notification:', data);
+
+                if (data.type === 'notification_history') {
+                    if (data.notifications.length > 0) {
+                        notificationLog.innerHTML += '<p><em>--- Unread Notifications ---</em></p>';
+                        data.notifications.forEach(notif => {
+                            addNotificationToLog(notif.message, notif.timestamp, notif.id);
+                        });
+                    } else {
+                         notificationLog.innerHTML += '<p><em>No unread notifications.</em></p>';
+                    }
+                } else if (data.type === 'notification') {
+                    addNotificationToLog(data.message, data.timestamp, data.id);
+                    alert('New Notification: ' + data.message); // Live notification alert
+                } else {
+                    console.warn('Unknown notification message type received:', data.type);
+                }
+            };
+
+            notificationSocket.onclose = function(e) {
+                console.error('Notification socket closed unexpectedly');
+                if (e.code === 1000) {
+                    notificationLog.innerHTML += '<p><em>Disconnected from notifications.</em></p>';
+                } else if (e.code === 1006) {
+                     notificationLog.innerHTML += '<p><em>Notification connection failed or closed. Are you logged in? (Code: ' + e.code + ')</em></p>';
+                } else if (e.code === 1008) { // Policy Violation (e.g., unauthorized user_id)
+                    notificationLog.innerHTML += '<p style="color: red;"><em>Notification connection rejected (Policy Violation). Are you logged in to the correct user?</em></p>';
+                } else {
+                    notificationLog.innerHTML += '<p><em>Disconnected from notifications (Code: ' + e.code + ').</em></p>';
+                }
+            };
+
+            notificationSocket.onerror = function(e) {
+                console.error('Notification WebSocket error:', e);
+                notificationLog.innerHTML += '<p style="color: red;"><em>Notification WebSocket error. Check console.</em></p>';
+            };
+        }
+    </script>
+</body>
+</html>

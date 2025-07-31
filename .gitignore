@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.pyc
+*.pyd
+*.pyo
+.Python
+build/
+develop-eggs/
+dist/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.ipynb_checkpoints
+.env
+.venv
+venv/  # Your virtual environment folder
+env/
+
+# Django
+*.log
+*.pot
+*.mo
+*.js.map
+*.css.map
+media
+static_root # If you collect static files here
+db.sqlite3 # Your SQLite database file
+
+# IDEs and other
+.idea/  # IntelliJ/PyCharm
+.vscode/ # VS Code
+.DS_Store # macOS
+Thumbs.db # Windows
